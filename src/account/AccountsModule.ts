@@ -39,6 +39,8 @@ import { WithdrawnHandler } from 'src/account/application/event/WithdrawnHandler
 import { AccountDomainService } from 'src/account/domain/AccountDomainService';
 import { AccountFactory } from 'src/account/domain/AccountFactory';
 
+import { TasksModule } from 'src/task/TasksModule';
+
 const infrastructure: Provider[] = [
   {
     provide: InjectionToken.ACCOUNT_REPOSITORY,
@@ -70,7 +72,7 @@ const application = [
 const domain = [AccountDomainService, AccountFactory];
 
 @Module({
-  imports: [CqrsModule, PasswordModule],
+  imports: [CqrsModule, PasswordModule, TasksModule],
   controllers: [AccountsController, AccountTaskController],
   providers: [Logger, ...infrastructure, ...application, ...domain],
 })

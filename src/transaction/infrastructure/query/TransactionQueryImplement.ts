@@ -21,7 +21,7 @@ export class TransactionQueryImplement implements TransactionQuery {
 
   async find(query: FindTransactionsQuery): Promise<FindTransactionsResult> {
     const repository = readConnection.getRepository(TransactionEntity);
-    
+
     const where: any = {
       accountId: this.entityIdTransformer.to(query.accountId),
     };
@@ -74,7 +74,7 @@ export class TransactionQueryImplement implements TransactionQuery {
     netChange: number;
   }> {
     const repository = readConnection.getRepository(TransactionEntity);
-    
+
     const where: any = {
       accountId: this.entityIdTransformer.to(accountId),
     };
@@ -111,7 +111,8 @@ export class TransactionQueryImplement implements TransactionQuery {
       }
     }
 
-    const netChange = totalDeposit + totalRemitIn - totalWithdraw - totalRemitOut;
+    const netChange =
+      totalDeposit + totalRemitIn - totalWithdraw - totalRemitOut;
 
     return {
       totalDeposit,

@@ -68,7 +68,9 @@ export class TransactionsController {
     const query = new FindTransactionsQuery({
       accountId,
       type: querystring.type,
-      startDate: querystring.startDate ? new Date(querystring.startDate) : undefined,
+      startDate: querystring.startDate
+        ? new Date(querystring.startDate)
+        : undefined,
       endDate: querystring.endDate ? new Date(querystring.endDate) : undefined,
       skip: querystring.skip,
       take: querystring.take,
@@ -128,7 +130,9 @@ export class TransactionsController {
 
     const query = new FindTransactionsQuery({
       accountId,
-      startDate: querystring.startDate ? new Date(querystring.startDate) : undefined,
+      startDate: querystring.startDate
+        ? new Date(querystring.startDate)
+        : undefined,
       endDate: querystring.endDate ? new Date(querystring.endDate) : undefined,
       skip: 0,
       take: 10000,
@@ -143,7 +147,9 @@ export class TransactionsController {
 
     let csv = 'ID,Type,Amount,Balance After,Counterparty,Description,Date\n';
     for (const tx of result.transactions) {
-      csv += `${tx.id},${tx.type},${tx.amount},${tx.balanceAfter},${tx.counterpartyId || ''},${tx.description || ''},${tx.createdAt.toISOString()}\n`;
+      csv += `${tx.id},${tx.type},${tx.amount},${tx.balanceAfter},${
+        tx.counterpartyId || ''
+      },${tx.description || ''},${tx.createdAt.toISOString()}\n`;
     }
 
     csv += '\nSummary\n';
@@ -153,7 +159,9 @@ export class TransactionsController {
     csv += `Total Remit In,${summary.totalRemitIn}\n`;
     csv += `Net Change,${summary.netChange}\n`;
 
-    const filename = `transactions_${accountId}_${new Date().toISOString().split('T')[0]}.csv`;
+    const filename = `transactions_${accountId}_${
+      new Date().toISOString().split('T')[0]
+    }.csv`;
 
     return { data: csv, filename };
   }

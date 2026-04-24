@@ -8,7 +8,9 @@ import { TransactionRepository } from 'src/transaction/domain/TransactionReposit
 import { InjectionToken } from 'src/transaction/application/InjectionToken';
 
 @EventsHandler(RemittedInEvent)
-export class TransactionRemittedInHandler implements IEventHandler<RemittedInEvent> {
+export class TransactionRemittedInHandler
+  implements IEventHandler<RemittedInEvent>
+{
   @Inject(InjectionToken.TRANSACTION_REPOSITORY)
   private readonly transactionRepository: TransactionRepository;
   @Inject() private readonly transactionFactory: TransactionFactory;

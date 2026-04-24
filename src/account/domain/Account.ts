@@ -1,10 +1,15 @@
-import {
-  UnprocessableEntityException,
-  InternalServerErrorException,
-} from '@nestjs/common';
 import { AggregateRoot } from '@nestjs/cqrs';
 
-import { ErrorMessage } from 'src/account/domain/ErrorMessage';
+import {
+  InsufficientBalanceError,
+  InvalidAmountError,
+  BalanceRemainedError,
+  AccountLockedError,
+  INVALID_AMOUNT_ERROR_MESSAGE,
+  INSUFFICIENT_BALANCE_ERROR_MESSAGE,
+  BALANCE_REMAINED_ERROR_MESSAGE,
+  ACCOUNT_LOCKED_ERROR_MESSAGE,
+} from 'libs/errors';
 import { AccountClosedEvent } from 'src/account/domain/event/AccountClosedEvent';
 import { AccountOpenedEvent } from 'src/account/domain/event/AccountOpenedEvent';
 import { DepositedEvent } from 'src/account/domain/event/DepositedEvent';
@@ -66,6 +71,7 @@ export class AccountImplement extends AggregateRoot implements Account {
     super();
     Object.assign(this, properties);
   }
+  commit: () => void;
 
   compareId(id: string): boolean {
     return id === this.id;
@@ -86,58 +92,50 @@ export class AccountImplement extends AggregateRoot implements Account {
   }
 
   withdraw(amount: number): void {
-    if (amount < 1)
-      throw new InternalServerErrorException(
-        ErrorMessage.CAN_NOT_WITHDRAW_UNDER_1,
-      );
+    if (amount < 1) throw new InvalidAmountError(INVALID_AMOUNT_ERROR_MESSAGE);
     if (this.balance < amount)
-      throw new UnprocessableEntityException(
-        ErrorMessage.REQUESTED_AMOUNT_EXCEEDS_YOUR_WITHDRAWAL_LIMIT,
-      );
+      throw new InsufficientBalanceError(INSUFFICIENT_BALANCE_ERROR_MESSAGE);
     this.balance -= amount;
     this.updatedAt = new Date();
     this.apply(new WithdrawnEvent(this.id, this.email, amount, this.balance));
   }
 
   deposit(amount: number): void {
-    if (amount < 1)
-      throw new InternalServerErrorException(
-        ErrorMessage.CAN_NOT_DEPOSIT_UNDER_1,
-      );
+    if (amount < 1) throw new InvalidAmountError(INVALID_AMOUNT_ERROR_MESSAGE);
     this.balance += amount;
     this.updatedAt = new Date();
     this.apply(new DepositedEvent(this.id, this.email, amount, this.balance));
   }
 
   remitOut(amount: number, receiverId: string): void {
-    if (amount < 1)
-      throw new InternalServerErrorException(
-        ErrorMessage.CAN_NOT_WITHDRAW_UNDER_1,
-      );
+    if (amount < 1) throw new InvalidAmountError(INVALID_AMOUNT_ERROR_MESSAGE);
     if (this.balance < amount)
-      throw new UnprocessableEntityException(
-        ErrorMessage.REQUESTED_AMOUNT_EXCEEDS_YOUR_WITHDRAWAL_LIMIT,
-      );
+      throw new InsufficientBalanceError(INSUFFICIENT_BALANCE_ERROR_MESSAGE);
     this.balance -= amount;
     this.updatedAt = new Date();
-    this.apply(new RemittedOutEvent(this.id, this.email, amount, this.balance, receiverId));
+    this.apply(
+      new RemittedOutEvent(
+        this.id,
+        this.email,
+        amount,
+        this.balance,
+        receiverId,
+      ),
+    );
   }
 
   remitIn(amount: number, senderId: string): void {
-    if (amount < 1)
-      throw new InternalServerErrorException(
-        ErrorMessage.CAN_NOT_DEPOSIT_UNDER_1,
-      );
+    if (amount < 1) throw new InvalidAmountError(INVALID_AMOUNT_ERROR_MESSAGE);
     this.balance += amount;
     this.updatedAt = new Date();
-    this.apply(new RemittedInEvent(this.id, this.email, amount, this.balance, senderId));
+    this.apply(
+      new RemittedInEvent(this.id, this.email, amount, this.balance, senderId),
+    );
   }
 
   close(): void {
     if (this.balance > 0)
-      throw new UnprocessableEntityException(
-        ErrorMessage.ACCOUNT_BALANCE_IS_REMAINED,
-      );
+      throw new BalanceRemainedError(BALANCE_REMAINED_ERROR_MESSAGE);
     this.deletedAt = new Date();
     this.updatedAt = new Date();
     this.apply(new AccountClosedEvent(this.id, this.email));
@@ -145,7 +143,7 @@ export class AccountImplement extends AggregateRoot implements Account {
 
   lock(): void {
     if (this.lockedAt)
-      throw new UnprocessableEntityException('Account is already locked');
+      throw new AccountLockedError(ACCOUNT_LOCKED_ERROR_MESSAGE);
     this.lockedAt = new Date();
     this.updatedAt = new Date();
     this.version += 1;

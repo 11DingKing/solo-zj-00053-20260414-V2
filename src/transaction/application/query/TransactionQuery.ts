@@ -3,7 +3,11 @@ import { FindTransactionsResult } from 'src/transaction/application/query/FindTr
 
 export interface TransactionQuery {
   find: (query: FindTransactionsQuery) => Promise<FindTransactionsResult>;
-  getSummary: (accountId: string, startDate?: Date, endDate?: Date) => Promise<{
+  getSummary: (
+    accountId: string,
+    startDate?: Date,
+    endDate?: Date,
+  ) => Promise<{
     totalDeposit: number;
     totalWithdraw: number;
     totalRemitOut: number;

@@ -10,7 +10,8 @@ import { FindTransactionsResult } from 'src/transaction/application/query/FindTr
 export class FindTransactionsHandler
   implements IQueryHandler<FindTransactionsQuery, FindTransactionsResult>
 {
-  @Inject(InjectionToken.TRANSACTION_QUERY) readonly transactionQuery: TransactionQuery;
+  @Inject(InjectionToken.TRANSACTION_QUERY)
+  readonly transactionQuery: TransactionQuery;
 
   async execute(query: FindTransactionsQuery): Promise<FindTransactionsResult> {
     return this.transactionQuery.find(query);

@@ -10,7 +10,10 @@ import {
 import { TransactionEntity } from 'src/transaction/infrastructure/entity/TransactionEntity';
 
 import { TransactionRepository } from 'src/transaction/domain/TransactionRepository';
-import { Transaction, TransactionProperties } from 'src/transaction/domain/Transaction';
+import {
+  Transaction,
+  TransactionProperties,
+} from 'src/transaction/domain/Transaction';
 import { TransactionFactory } from 'src/transaction/domain/TransactionFactory';
 
 export class TransactionRepositoryImplement implements TransactionRepository {
@@ -25,7 +28,9 @@ export class TransactionRepositoryImplement implements TransactionRepository {
   async save(data: Transaction | Transaction[]): Promise<void> {
     const models = Array.isArray(data) ? data : [data];
     const entities = models.map((model) => this.modelToEntity(model));
-    await writeConnection.manager.getRepository(TransactionEntity).save(entities);
+    await writeConnection.manager
+      .getRepository(TransactionEntity)
+      .save(entities);
   }
 
   async findById(id: string): Promise<Transaction | null> {
@@ -43,7 +48,9 @@ export class TransactionRepositoryImplement implements TransactionRepository {
   }
 
   private modelToEntity(model: Transaction): TransactionEntity {
-    const properties = JSON.parse(JSON.stringify(model)) as TransactionProperties;
+    const properties = JSON.parse(
+      JSON.stringify(model),
+    ) as TransactionProperties;
     return {
       ...properties,
       id: this.entityIdTransformer.to(properties.id),

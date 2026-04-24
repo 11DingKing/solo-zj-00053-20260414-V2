@@ -4,17 +4,19 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
+  Inject,
   Param,
   Post,
   Patch,
   Query,
   UseInterceptors,
   HttpStatus,
-  NotFoundException,
   Headers,
 } from '@nestjs/common';
 import { CommandBus, QueryBus } from '@nestjs/cqrs';
 import {
+  ApiAcceptedResponse,
   ApiBadRequestResponse,
   ApiInternalServerErrorResponse,
   ApiNotFoundResponse,
@@ -25,6 +27,10 @@ import {
 } from '@nestjs/swagger';
 
 import { Auth, AuthorizedHeader } from 'libs/Auth';
+import {
+  AccountNotFoundError,
+  ACCOUNT_NOT_FOUND_ERROR_MESSAGE,
+} from 'libs/errors';
 
 import { DepositRequestDto } from 'src/account/interface/dto/DepositRequestDto';
 import { FindAccountsRequestQueryString } from 'src/account/interface/dto/FindAccountsRequestQueryString';
@@ -40,6 +46,7 @@ import { DeleteAccountRequestParam } from 'src/account/interface/dto/DeleteAccou
 import { FindAccountByIdRequestParam } from 'src/account/interface/dto/FindAccountByIdRequestParam';
 import { FindAccountByIdResponseDTO } from 'src/account/interface/dto/FindAccountByIdResponseDTO';
 import { FindAccountsResponseDto } from 'src/account/interface/dto/FindAccountsResponseDto';
+import { AsyncTaskResponseDto } from 'src/task/interface/dto/AsyncTaskResponseDto';
 import { ResponseDescription } from 'src/account/interface/ResponseDescription';
 
 import { CloseAccountCommand } from 'src/account/application/command/CloseAccountCommand';
@@ -50,13 +57,16 @@ import { WithdrawCommand } from 'src/account/application/command/WithdrawCommand
 import { FindAccountByIdQuery } from 'src/account/application/query/FindAccountByIdQuery';
 import { FindAccountsQuery } from 'src/account/application/query/FindAccountsQuery';
 import { RemitCommand } from 'src/account/application/command/RemitCommand';
-
-import { ErrorMessage } from 'src/account/domain/ErrorMessage';
+import { AsyncCommandService } from 'src/task/application/command/AsyncCommandService';
 
 @ApiTags('Accounts')
 @Controller()
 export class AccountsController {
-  constructor(readonly commandBus: CommandBus, readonly queryBus: QueryBus) {}
+  constructor(
+    readonly commandBus: CommandBus,
+    readonly queryBus: QueryBus,
+    @Inject() private readonly asyncCommandService: AsyncCommandService,
+  ) {}
 
   @Post('accounts')
   @ApiResponse({
@@ -97,7 +107,7 @@ export class AccountsController {
     @Body() body: WithdrawRequestDTO,
   ): Promise<void> {
     if (header.accountId !== param.accountId)
-      throw new NotFoundException(ErrorMessage.ACCOUNT_IS_NOT_FOUND);
+      throw new AccountNotFoundError(ACCOUNT_NOT_FOUND_ERROR_MESSAGE);
     await this.commandBus.execute(
       new WithdrawCommand(param.accountId, body.amount),
     );
@@ -120,7 +130,7 @@ export class AccountsController {
     @Body() body: DepositRequestDto,
   ): Promise<void> {
     if (header.accountId !== param.accountId)
-      throw new NotFoundException(ErrorMessage.ACCOUNT_IS_NOT_FOUND);
+      throw new AccountNotFoundError(ACCOUNT_NOT_FOUND_ERROR_MESSAGE);
     await this.commandBus.execute(
       new DepositCommand(param.accountId, body.amount),
     );
@@ -128,9 +138,10 @@ export class AccountsController {
 
   @Auth()
   @Post('accounts/:accountId/remit')
-  @ApiResponse({
-    status: HttpStatus.CREATED,
-    description: ResponseDescription.CREATED,
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiAcceptedResponse({
+    description: 'Remittance request accepted for processing',
+    type: AsyncTaskResponseDto,
   })
   @ApiBadRequestResponse({ description: ResponseDescription.BAD_REQUEST })
   @ApiNotFoundResponse({ description: ResponseDescription.NOT_FOUND })
@@ -145,12 +156,16 @@ export class AccountsController {
     @Headers() header: AuthorizedHeader,
     @Param() param: RemitRequestParam,
     @Body() body: RemitRequestDTO,
-  ): Promise<void> {
+  ): Promise<AsyncTaskResponseDto> {
     if (header.accountId !== param.accountId)
-      throw new NotFoundException(ErrorMessage.ACCOUNT_IS_NOT_FOUND);
-    await this.commandBus.execute(
-      new RemitCommand(param.accountId, body.receiverId, body.amount),
+      throw new AccountNotFoundError(ACCOUNT_NOT_FOUND_ERROR_MESSAGE);
+
+    const command = new RemitCommand(
+      param.accountId,
+      body.receiverId,
+      body.amount,
     );
+    return this.asyncCommandService.executeAsync(command, 3);
   }
 
   @Auth()
@@ -168,7 +183,7 @@ export class AccountsController {
     @Body() body: UpdatePasswordRequestDTO,
   ): Promise<void> {
     if (header.accountId !== param.accountId)
-      throw new NotFoundException(ErrorMessage.ACCOUNT_IS_NOT_FOUND);
+      throw new AccountNotFoundError(ACCOUNT_NOT_FOUND_ERROR_MESSAGE);
     await this.commandBus.execute(
       new UpdatePasswordCommand(param.accountId, body.password),
     );
@@ -191,7 +206,7 @@ export class AccountsController {
     @Param() param: DeleteAccountRequestParam,
   ): Promise<void> {
     if (header.accountId !== param.accountId)
-      throw new NotFoundException(ErrorMessage.ACCOUNT_IS_NOT_FOUND);
+      throw new AccountNotFoundError(ACCOUNT_NOT_FOUND_ERROR_MESSAGE);
     await this.commandBus.execute(new CloseAccountCommand(param.accountId));
   }
 
@@ -231,7 +246,7 @@ export class AccountsController {
     @Param() param: FindAccountByIdRequestParam,
   ): Promise<FindAccountByIdResponseDTO> {
     if (header.accountId !== param.accountId)
-      throw new NotFoundException(ErrorMessage.ACCOUNT_IS_NOT_FOUND);
+      throw new AccountNotFoundError(ACCOUNT_NOT_FOUND_ERROR_MESSAGE);
     return this.queryBus.execute(new FindAccountByIdQuery(param.accountId));
   }
 }

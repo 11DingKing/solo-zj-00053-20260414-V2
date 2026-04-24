@@ -17,6 +17,7 @@ import { AppService } from 'src/AppService';
 import { AccountsModule } from 'src/account/AccountsModule';
 import { NotificationModule } from 'src/notification/NotificationModule';
 import { TransactionsModule } from 'src/transaction/TransactionsModule';
+import { TasksModule } from 'src/task/TasksModule';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { TransactionsModule } from 'src/transaction/TransactionsModule';
     TransactionsModule,
     DatabaseModule,
     MessageModule,
+    TasksModule,
     CacheModule.register({ isGlobal: true }),
     ThrottlerModule.forRoot(),
     NotificationModule,

@@ -1,4 +1,7 @@
-import { Transaction, TransactionProperties } from 'src/transaction/domain/Transaction';
+import {
+  Transaction,
+  TransactionProperties,
+} from 'src/transaction/domain/Transaction';
 import { TransactionImplement } from 'src/transaction/domain/Transaction';
 
 export class TransactionFactory {

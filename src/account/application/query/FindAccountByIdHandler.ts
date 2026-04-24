@@ -1,16 +1,15 @@
-import {
-  Inject,
-  InternalServerErrorException,
-  NotFoundException,
-} from '@nestjs/common';
+import { Inject } from '@nestjs/common';
 import { IQueryHandler, QueryHandler } from '@nestjs/cqrs';
+
+import {
+  AccountNotFoundError,
+  ACCOUNT_NOT_FOUND_ERROR_MESSAGE,
+} from 'libs/errors';
 
 import { InjectionToken } from 'src/account/application/InjectionToken';
 import { AccountQuery } from 'src/account/application/query/AccountQuery';
 import { FindAccountByIdQuery } from 'src/account/application/query/FindAccountByIdQuery';
 import { FindAccountByIdResult } from 'src/account/application/query/FindAccountByIdResult';
-
-import { ErrorMessage } from 'src/account/domain/ErrorMessage';
 
 @QueryHandler(FindAccountByIdQuery)
 export class FindAccountByIdHandler
@@ -20,16 +19,16 @@ export class FindAccountByIdHandler
 
   async execute(query: FindAccountByIdQuery): Promise<FindAccountByIdResult> {
     const data = await this.accountQuery.findById(query.id);
-    if (!data) throw new NotFoundException(ErrorMessage.ACCOUNT_IS_NOT_FOUND);
+    if (!data) throw new AccountNotFoundError(ACCOUNT_NOT_FOUND_ERROR_MESSAGE);
 
     const dataKeys = Object.keys(data);
     const resultKeys = Object.keys(new FindAccountByIdResult());
 
     if (dataKeys.length < resultKeys.length)
-      throw new InternalServerErrorException();
+      throw new Error('Data structure mismatch');
 
     if (resultKeys.find((resultKey) => !dataKeys.includes(resultKey)))
-      throw new InternalServerErrorException();
+      throw new Error('Data structure mismatch');
 
     dataKeys
       .filter((dataKey) => !resultKeys.includes(dataKey))

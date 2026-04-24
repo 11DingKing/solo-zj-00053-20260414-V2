@@ -1,16 +1,17 @@
-import {
-  Inject,
-  NotFoundException,
-  UnprocessableEntityException,
-} from '@nestjs/common';
+import { Inject } from '@nestjs/common';
 import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 
 import { Transactional } from 'libs/Transactional';
+import {
+  AccountNotFoundError,
+  SameAccountError,
+  ACCOUNT_NOT_FOUND_ERROR_MESSAGE,
+  SAME_ACCOUNT_ERROR_MESSAGE,
+} from 'libs/errors';
 
 import { RemitCommand } from 'src/account/application/command/RemitCommand';
 import { InjectionToken } from 'src/account/application/InjectionToken';
 
-import { ErrorMessage } from 'src/account/domain/ErrorMessage';
 import { AccountRepository } from 'src/account/domain/AccountRepository';
 import { AccountDomainService } from 'src/account/domain/AccountDomainService';
 
@@ -23,17 +24,15 @@ export class RemitHandler implements ICommandHandler<RemitCommand, void> {
   @Transactional()
   async execute(command: RemitCommand): Promise<void> {
     if (command.accountId === command.receiverId)
-      throw new UnprocessableEntityException(
-        ErrorMessage.WITHDRAWAL_AND_DEPOSIT_ACCOUNTS_CANNOT_BE_THE_SAME,
-      );
+      throw new SameAccountError(SAME_ACCOUNT_ERROR_MESSAGE);
 
     const account = await this.accountRepository.findById(command.accountId);
     if (!account)
-      throw new NotFoundException(ErrorMessage.ACCOUNT_IS_NOT_FOUND);
+      throw new AccountNotFoundError(ACCOUNT_NOT_FOUND_ERROR_MESSAGE);
 
     const receiver = await this.accountRepository.findById(command.receiverId);
     if (!receiver)
-      throw new UnprocessableEntityException(ErrorMessage.ACCOUNT_IS_NOT_FOUND);
+      throw new AccountNotFoundError(ACCOUNT_NOT_FOUND_ERROR_MESSAGE);
 
     this.accountDomainService.remit({ ...command, account, receiver });
 

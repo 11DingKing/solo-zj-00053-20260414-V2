@@ -14,6 +14,7 @@ import {
   ReceiveMessageCommand,
   SendMessageCommand,
   SQSClient,
+  MessageAttributeValue,
 } from '@aws-sdk/client-sqs';
 import {
   CreateTopicCommand,
@@ -23,15 +24,33 @@ import {
 import { Interval } from '@nestjs/schedule';
 
 import { RequestStorage } from 'libs/RequestStorage';
+import { BusinessError } from 'libs/errors/BusinessError';
 
 import { Config } from 'src/Config';
 
-type Message = Readonly<{ name: string; body: IEvent; requestId: string }>;
+type Message = Readonly<{
+  name: string;
+  body: IEvent;
+  requestId: string;
+  taskId?: string;
+  retryCount?: number;
+  maxRetries?: number;
+}>;
+
 type MessageHandlerMetadata = Readonly<{ name: string }>;
 
 const SQS_CONSUMER_METHOD = Symbol.for('SQS_CONSUMER_METHOD');
 export const MessageHandler = (name: string) =>
   SetMetadata<symbol, MessageHandlerMetadata>(SQS_CONSUMER_METHOD, { name });
+
+const MAX_RETRIES = 3;
+const INITIAL_RETRY_DELAY_SECONDS = 1;
+const MAX_RETRY_DELAY_SECONDS = 30;
+
+function calculateExponentialBackoffDelay(retryCount: number): number {
+  const delay = INITIAL_RETRY_DELAY_SECONDS * Math.pow(2, retryCount);
+  return Math.min(delay, MAX_RETRY_DELAY_SECONDS) + Math.random();
+}
 
 class SQSConsumerService implements OnModuleDestroy {
   private readonly logger = new Logger(SQSConsumerService.name);
@@ -56,6 +75,7 @@ class SQSConsumerService implements OnModuleDestroy {
           AttributeNames: ['All'],
           MessageAttributeNames: ['All'],
           MaxNumberOfMessages: 1,
+          WaitTimeSeconds: 5,
         }),
       )
     ).Messages;
@@ -75,10 +95,14 @@ class SQSConsumerService implements OnModuleDestroy {
         SQS_CONSUMER_METHOD,
       )
     ).find((handler) => handler.meta.name === message.name);
-    if (!handler)
-      throw new Error(
+    if (!handler) {
+      await this.moveToDeadLetterQueue(
+        message,
         `Message handler is not found. Message: ${JSON.stringify(message)}`,
       );
+      await this.deleteMessage(response[0].ReceiptHandle);
+      return;
+    }
 
     const controller = Array.from(this.modulesContainer.values())
       .filter((module) => 0 < module.controllers.size)
@@ -86,33 +110,162 @@ class SQSConsumerService implements OnModuleDestroy {
       .find(
         (wrapper) => wrapper.name == handler.discoveredMethod.parentClass.name,
       );
-    if (!controller)
-      throw new Error(
+    if (!controller) {
+      await this.moveToDeadLetterQueue(
+        message,
         `Message handling controller is not found. Message: ${JSON.stringify(
           message,
         )}`,
       );
+      await this.deleteMessage(response[0].ReceiptHandle);
+      return;
+    }
 
     try {
       await handler.discoveredMethod.handler.bind(controller.instance)(
         message.body,
       );
-      await this.sqsClient.send(
-        new DeleteMessageCommand({
-          QueueUrl: Config.AWS_SQS_QUEUE_URL,
-          ReceiptHandle: response[0].ReceiptHandle,
-        }),
+      await this.deleteMessage(response[0].ReceiptHandle);
+      this.logger.log(
+        `Message handling completed. Message: ${JSON.stringify(message)}`,
       );
     } catch (error) {
-      return this.logger.error(
-        `Message handling error. Message: ${JSON.stringify(
+      const isBusinessError = error instanceof BusinessError;
+      const retryCount = message.retryCount || 0;
+      const maxRetries = message.maxRetries || MAX_RETRIES;
+
+      if (isBusinessError) {
+        this.logger.error(
+          `Business error occurred, will not retry. Message: ${JSON.stringify(
+            message,
+          )}. Error: ${error}`,
+        );
+        await this.moveToDeadLetterQueue(message, error.message);
+        await this.deleteMessage(response[0].ReceiptHandle);
+        return;
+      }
+
+      if (retryCount < maxRetries) {
+        const newRetryCount = retryCount + 1;
+        const delaySeconds = Math.round(
+          calculateExponentialBackoffDelay(newRetryCount),
+        );
+
+        this.logger.warn(
+          `Retrying message (attempt ${newRetryCount}/${maxRetries}) after ${delaySeconds}s delay. Message: ${JSON.stringify(
+            message,
+          )}. Error: ${error}`,
+        );
+
+        await this.retryMessage(
+          {
+            ...message,
+            retryCount: newRetryCount,
+            maxRetries,
+          },
+          delaySeconds,
+        );
+        await this.deleteMessage(response[0].ReceiptHandle);
+      } else {
+        this.logger.error(
+          `Message failed after ${maxRetries} retries, moving to dead letter queue. Message: ${JSON.stringify(
+            message,
+          )}. Error: ${error}`,
+        );
+        await this.moveToDeadLetterQueue(
           message,
-        )}. Error: ${error}`,
-      );
+          error instanceof Error ? error.message : String(error),
+        );
+        await this.deleteMessage(response[0].ReceiptHandle);
+      }
     }
-    this.logger.log(
-      `Message handling completed. Message: ${JSON.stringify(message)}`,
+  }
+
+  private async deleteMessage(receiptHandle: string | undefined): Promise<void> {
+    if (!receiptHandle) return;
+    await this.sqsClient.send(
+      new DeleteMessageCommand({
+        QueueUrl: Config.AWS_SQS_QUEUE_URL,
+        ReceiptHandle: receiptHandle,
+      }),
     );
+  }
+
+  private async retryMessage(
+    message: Message,
+    delaySeconds: number,
+  ): Promise<void> {
+    await this.sqsClient.send(
+      new SendMessageCommand({
+        QueueUrl: Config.AWS_SQS_QUEUE_URL,
+        MessageBody: JSON.stringify(message),
+        DelaySeconds: delaySeconds,
+        MessageAttributes: {
+          RetryCount: {
+            DataType: 'Number',
+            StringValue: String(message.retryCount || 0),
+          } as MessageAttributeValue,
+          MaxRetries: {
+            DataType: 'Number',
+            StringValue: String(message.maxRetries || MAX_RETRIES),
+          } as MessageAttributeValue,
+        },
+      }),
+    );
+    this.logger.log(
+      `Message queued for retry. Message: ${JSON.stringify(
+        message,
+      )}, Delay: ${delaySeconds}s`,
+    );
+  }
+
+  private async moveToDeadLetterQueue(
+    message: Message,
+    errorReason: string,
+  ): Promise<void> {
+    const deadLetterQueueUrl = this.getDeadLetterQueueUrl();
+    if (!deadLetterQueueUrl) {
+      this.logger.warn(
+        `Dead letter queue not configured. Message will be lost. Message: ${JSON.stringify(
+          message,
+        )}`,
+      );
+      return;
+    }
+
+    const deadLetterMessage = {
+      ...message,
+      originalMessage: JSON.stringify(message),
+      errorReason,
+      timestamp: new Date().toISOString(),
+    };
+
+    await this.sqsClient.send(
+      new SendMessageCommand({
+        QueueUrl: deadLetterQueueUrl,
+        MessageBody: JSON.stringify(deadLetterMessage),
+        MessageAttributes: {
+          OriginalQueueUrl: {
+            DataType: 'String',
+            StringValue: Config.AWS_SQS_QUEUE_URL,
+          } as MessageAttributeValue,
+          ErrorReason: {
+            DataType: 'String',
+            StringValue: errorReason,
+          } as MessageAttributeValue,
+        },
+      }),
+    );
+    this.logger.error(
+      `Message moved to dead letter queue. Message: ${JSON.stringify(
+        deadLetterMessage,
+      )}`,
+    );
+  }
+
+  private getDeadLetterQueueUrl(): string | null {
+    const dlqUrl = process.env.AWS_SQS_DEAD_LETTER_QUEUE_URL;
+    return dlqUrl || null;
   }
 
   onModuleDestroy(): void {
@@ -195,12 +348,12 @@ class SQSMessagePublisher {
   });
   private readonly logger = new Logger(SQSMessagePublisher.name);
 
-  async publish(message: Message): Promise<void> {
+  async publish(message: Message, delaySeconds?: number): Promise<void> {
     await this.sqsClient.send(
       new SendMessageCommand({
         QueueUrl: Config.AWS_SQS_QUEUE_URL,
         MessageBody: JSON.stringify(message),
-        DelaySeconds: Math.round(Math.random() * 10),
+        DelaySeconds: delaySeconds ?? Math.round(Math.random() * 10),
       }),
     );
     this.logger.log(`Message published. Message: ${JSON.stringify(message)}`);
@@ -208,18 +361,42 @@ class SQSMessagePublisher {
 }
 
 export interface TaskPublisher {
-  publish: (name: string, task: IEvent) => Promise<void>;
+  publish: (
+    name: string,
+    task: IEvent,
+    taskId?: string,
+    maxRetries?: number,
+  ) => Promise<string>;
 }
 
 class TaskPublisherImplement implements TaskPublisher {
   @Inject() private readonly sqsMessagePublisher: SQSMessagePublisher;
 
-  async publish(name: string, body: IEvent): Promise<void> {
-    await this.sqsMessagePublisher.publish({
-      name,
-      body,
-      requestId: RequestStorage.getStorage().requestId,
-    });
+  async publish(
+    name: string,
+    body: IEvent,
+    taskId?: string,
+    maxRetries: number = MAX_RETRIES,
+  ): Promise<string> {
+    const generatedTaskId = taskId || this.generateTaskId();
+    await this.sqsMessagePublisher.publish(
+      {
+        name,
+        body,
+        requestId: RequestStorage.getStorage().requestId,
+        taskId: generatedTaskId,
+        retryCount: 0,
+        maxRetries,
+      },
+      0,
+    );
+    return generatedTaskId;
+  }
+
+  private generateTaskId(): string {
+    return [...Array(32)]
+      .map(() => Math.floor(Math.random() * 16).toString(16))
+      .join('');
   }
 }
 

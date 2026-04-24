@@ -1,6 +1,13 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, Max, Min, IsEnum, IsDateString } from 'class-validator';
+import {
+  IsInt,
+  IsOptional,
+  Max,
+  Min,
+  IsEnum,
+  IsDateString,
+} from 'class-validator';
 import { TransactionType } from 'src/transaction/domain/TransactionType';
 
 export class FindTransactionsRequestQueryString {
